@@ -1,6 +1,6 @@
 # Rally Run
 
-A small Playdate SDK Lua prototype inspired by classic maze-driving chase games.
+A small Playdate SDK Lua game inspired by classic maze-driving chase games.
 
 ## Controls
 
