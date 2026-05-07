@@ -8,7 +8,7 @@ A small Playdate SDK Lua game inspired by classic maze-driving chase games.
 - D-pad: queue turns
 - A: drop smoke
 - B: brake
-- Crank: steer left/right when undocked
+- Crank: point to steer up/right/down/left when undocked
 
 ## Build
 

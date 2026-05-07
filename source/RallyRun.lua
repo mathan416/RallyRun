@@ -1,5 +1,6 @@
 import "CoreLibs/graphics"
 import "CoreLibs/timer"
+import "CoreLibs/crank"
 
 local pd <const> = playdate
 local gfx <const> = pd.graphics
@@ -51,6 +52,8 @@ local RIGHT_TURN <const> = {
     left = "up",
     none = "right"
 }
+
+local CRANK_DIRECTIONS <const> = { "up", "right", "down", "left" }
 
 local FLAG_COUNT <const> = 10
 
@@ -748,6 +751,13 @@ local function queueRelativeTurn(turn)
     player.queuedDir = turn == "left" and LEFT_TURN[player.dir] or RIGHT_TURN[player.dir]
 end
 
+local function crankDirection()
+    local position = pd.getCrankPosition()
+    local index = math.floor(((position + 45) % 360) / 90) + 1
+
+    return CRANK_DIRECTIONS[index]
+end
+
 local function emitSmokeFrom(x, y, dirName, speed, amount)
     local rear = DIRS[OPPOSITE[dirName]]
     local side = { x = -rear.y, y = rear.x }
@@ -809,12 +819,7 @@ local function updateInput()
     end
 
     if not pd.isCrankDocked() then
-        local ticks = pd.getCrankTicks(4)
-        if ticks < 0 then
-            queueRelativeTurn("left")
-        elseif ticks > 0 then
-            queueRelativeTurn("right")
-        end
+        queueAbsoluteDirection(crankDirection())
     end
 
     if isDirection(player.queuedDir) and isCentered(player) and canMove(player, player.queuedDir) then
