@@ -29,6 +29,8 @@ local DIRS <const> = {
     none = { x = 0, y = 0 }
 }
 
+local CARDINAL_DIRECTIONS <const> = { "up", "down", "left", "right" }
+
 local OPPOSITE <const> = {
     up = "down",
     down = "up",
@@ -37,25 +39,11 @@ local OPPOSITE <const> = {
     none = "none"
 }
 
-local LEFT_TURN <const> = {
-    up = "left",
-    left = "down",
-    down = "right",
-    right = "up",
-    none = "left"
-}
-
-local RIGHT_TURN <const> = {
-    up = "right",
-    right = "down",
-    down = "left",
-    left = "up",
-    none = "right"
-}
-
 local CRANK_DIRECTIONS <const> = { "up", "right", "down", "left" }
+local CRANK_TICKS_PER_REV <const> = 16
 
 local FLAG_COUNT <const> = 10
+local MAX_SMOKE_PARTICLES <const> = 48
 
 local MAP <const> = {}
 
@@ -69,6 +57,7 @@ local enemies = {}
 local flags = {}
 local smoke = {}
 local particles = {}
+local mazeImage = nil
 local highScore = 0
 local celebrationCar = {}
 local titleCar = {
@@ -410,6 +399,33 @@ local function isWall(tx, ty)
     return MAP[ty + 1]:sub(tx + 1, tx + 1) == "#"
 end
 
+local function renderMazeImage()
+    mazeImage = gfx.image.new(WORLD_W, SCREEN_H)
+    gfx.pushContext(mazeImage)
+    gfx.setColor(gfx.kColorBlack)
+    gfx.fillRect(0, 0, WORLD_W, SCREEN_H)
+
+    for y = 0, GRID_H - 1 do
+        for x = 0, GRID_W - 1 do
+            if isWall(x, y) then
+                gfx.setColor(gfx.kColorWhite)
+                gfx.fillRoundRect(x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2, 2)
+                gfx.setColor(gfx.kColorBlack)
+                gfx.drawRect(x * CELL + 3, y * CELL + 3, CELL - 6, CELL - 6)
+            else
+                gfx.setColor(gfx.kColorWhite)
+                gfx.setDitherPattern(0.12, gfx.image.kDitherTypeBayer8x8)
+                gfx.fillRect(x * CELL, y * CELL, CELL, CELL)
+                gfx.setColor(gfx.kColorBlack)
+                gfx.drawPixel(x * CELL + CELL / 2, y * CELL + CELL / 2)
+                gfx.setDitherPattern(1, gfx.image.kDitherTypeBayer8x8)
+            end
+        end
+    end
+
+    gfx.popContext()
+end
+
 local function shuffle(list)
     for i = #list, 2, -1 do
         local j = math.random(1, i)
@@ -500,6 +516,7 @@ local function generateMaze()
     setMazeTile(maze, 17, 13, ".")
 
     mazeToRows(maze)
+    renderMazeImage()
 end
 
 local function isCentered(entity)
@@ -714,8 +731,10 @@ local function chooseEnemyDirection(enemy)
     local px, py = worldToTile(player.x, player.y)
     local options = {}
 
-    for name, dir in pairs(DIRS) do
-        if name ~= "none" and name ~= OPPOSITE[enemy.dir] and not isWall(tx + dir.x, ty + dir.y) then
+    for index = 1, #CARDINAL_DIRECTIONS do
+        local name = CARDINAL_DIRECTIONS[index]
+        local dir = DIRS[name]
+        if name ~= OPPOSITE[enemy.dir] and not isWall(tx + dir.x, ty + dir.y) then
             options[#options + 1] = name
         end
     end
@@ -726,7 +745,8 @@ local function chooseEnemyDirection(enemy)
 
     local best = options[1] or enemy.dir
     local bestScore = 9999
-    for _, name in ipairs(options) do
+    for index = 1, #options do
+        local name = options[index]
         local dir = DIRS[name]
         local dist = math.abs((tx + dir.x) - px) + math.abs((ty + dir.y) - py)
         if dist < bestScore or (dist == bestScore and math.random(1, 4) == 1) then
@@ -742,15 +762,6 @@ local function queueAbsoluteDirection(dirName)
     player.queuedDir = dirName
 end
 
-local function queueRelativeTurn(turn)
-    if player.dir == "none" then
-        player.queuedDir = turn == "left" and "left" or "right"
-        return
-    end
-
-    player.queuedDir = turn == "left" and LEFT_TURN[player.dir] or RIGHT_TURN[player.dir]
-end
-
 local function crankDirection()
     local position = pd.getCrankPosition()
     local index = math.floor(((position + 45) % 360) / 90) + 1
@@ -760,19 +771,25 @@ end
 
 local function emitSmokeFrom(x, y, dirName, speed, amount)
     local rear = DIRS[OPPOSITE[dirName]]
-    local side = { x = -rear.y, y = rear.x }
+    local sideX = -rear.y
+    local sideY = rear.x
     local baseX = x + rear.x * 10
     local baseY = y + rear.y * 10
     local carSpeed = math.max(speed, 0.8)
+    local overflow = #smoke + amount - MAX_SMOKE_PARTICLES
+
+    for _ = 1, math.max(0, overflow) do
+        table.remove(smoke, 1)
+    end
 
     for _ = 1, amount do
         local spread = math.random(-35, 35) / 10
         local push = math.random(8, 22) / 10
         smoke[#smoke + 1] = {
-            x = baseX + side.x * spread,
-            y = baseY + side.y * spread,
-            vx = rear.x * (push + carSpeed * 0.35) + side.x * math.random(-10, 10) / 20,
-            vy = rear.y * (push + carSpeed * 0.35) + side.y * math.random(-10, 10) / 20,
+            x = baseX + sideX * spread,
+            y = baseY + sideY * spread,
+            vx = rear.x * (push + carSpeed * 0.35) + sideX * math.random(-10, 10) / 20,
+            vy = rear.y * (push + carSpeed * 0.35) + sideY * math.random(-10, 10) / 20,
             radius = math.random(2, 5),
             grow = math.random(3, 8) / 100,
             life = math.random(46, 82),
@@ -808,6 +825,10 @@ local function moveEntity(entity, speed)
 end
 
 local function updateInput()
+    if not pd.isCrankDocked() and pd.getCrankTicks(CRANK_TICKS_PER_REV) ~= 0 then
+        queueAbsoluteDirection(crankDirection())
+    end
+
     if pd.buttonIsPressed(pd.kButtonUp) then
         queueAbsoluteDirection("up")
     elseif pd.buttonIsPressed(pd.kButtonDown) then
@@ -816,10 +837,6 @@ local function updateInput()
         queueAbsoluteDirection("left")
     elseif pd.buttonIsPressed(pd.kButtonRight) then
         queueAbsoluteDirection("right")
-    end
-
-    if not pd.isCrankDocked() then
-        queueAbsoluteDirection(crankDirection())
     end
 
     if isDirection(player.queuedDir) and isCentered(player) and canMove(player, player.queuedDir) then
@@ -872,7 +889,8 @@ local function updatePlayer()
 end
 
 local function updateEnemies()
-    for _, enemy in ipairs(enemies) do
+    for index = 1, #enemies do
+        local enemy = enemies[index]
         if enemy.stun > 0 then
             enemy.stun -= 1
         elseif isCentered(enemy) then
@@ -967,7 +985,8 @@ end
 
 local function checkCollisions()
     local ptx, pty = worldToTile(player.x, player.y)
-    for _, flag in ipairs(flags) do
+    for index = 1, #flags do
+        local flag = flags[index]
         if not flag.collected and flag.x == ptx and flag.y == pty then
             flag.collected = true
             game.collected += 1
@@ -982,16 +1001,21 @@ local function checkCollisions()
         end
     end
 
-    for _, enemy in ipairs(enemies) do
-        for _, particle in ipairs(smoke) do
-            local dx = enemy.x - particle.x
-            local dy = enemy.y - particle.y
-            local stunRadius = particle.radius + 8
-            if dx * dx + dy * dy < stunRadius * stunRadius and enemy.stun <= 0 then
-                enemy.stun = 135
-                game.score += 50
-                particle.life = math.min(particle.life, 18)
-                playStunSound()
+    for enemyIndex = 1, #enemies do
+        local enemy = enemies[enemyIndex]
+        if enemy.stun <= 0 then
+            for smokeIndex = 1, #smoke do
+                local particle = smoke[smokeIndex]
+                local dx = enemy.x - particle.x
+                local dy = enemy.y - particle.y
+                local stunRadius = particle.radius + 8
+                if dx * dx + dy * dy < stunRadius * stunRadius then
+                    enemy.stun = 135
+                    game.score += 50
+                    particle.life = math.min(particle.life, 18)
+                    playStunSound()
+                    break
+                end
             end
         end
 
@@ -1050,30 +1074,16 @@ local function updateGame()
 end
 
 local function drawMaze()
-    gfx.setColor(gfx.kColorBlack)
-    gfx.fillRect(0, 0, WORLD_W, SCREEN_H)
-
-    for y = 0, GRID_H - 1 do
-        for x = 0, GRID_W - 1 do
-            if isWall(x, y) then
-                gfx.setColor(gfx.kColorWhite)
-                gfx.fillRoundRect(x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2, 2)
-                gfx.setColor(gfx.kColorBlack)
-                gfx.drawRect(x * CELL + 3, y * CELL + 3, CELL - 6, CELL - 6)
-            else
-                gfx.setColor(gfx.kColorWhite)
-                gfx.setDitherPattern(0.12, gfx.image.kDitherTypeBayer8x8)
-                gfx.fillRect(x * CELL, y * CELL, CELL, CELL)
-                gfx.setColor(gfx.kColorBlack)
-                gfx.drawPixel(x * CELL + CELL / 2, y * CELL + CELL / 2)
-                gfx.setDitherPattern(1, gfx.image.kDitherTypeBayer8x8)
-            end
-        end
+    if mazeImage == nil then
+        renderMazeImage()
     end
+
+    mazeImage:draw(0, 0)
 end
 
 local function drawFlags()
-    for _, flag in ipairs(flags) do
+    for index = 1, #flags do
+        local flag = flags[index]
         if not flag.collected then
             local x, y = tileToWorld(flag.x, flag.y)
             flag.pulse += 0.12
@@ -1087,7 +1097,8 @@ local function drawFlags()
 end
 
 local function drawSmoke()
-    for _, particle in ipairs(smoke) do
+    for index = 1, #smoke do
+        local particle = smoke[index]
         local age = 1 - particle.life / particle.maxLife
         local dither = age < 0.35 and 0.72 or 0.42
         gfx.setColor(gfx.kColorWhite)
@@ -1149,7 +1160,8 @@ local function drawCelebrationCar()
 end
 
 local function drawEnemies()
-    for _, enemy in ipairs(enemies) do
+    for index = 1, #enemies do
+        local enemy = enemies[index]
         gfx.setColor(gfx.kColorWhite)
         if enemy.stun > 0 then
             gfx.setDitherPattern(0.35, gfx.image.kDitherTypeBayer8x8)
@@ -1165,7 +1177,8 @@ end
 
 local function drawParticles()
     gfx.setColor(gfx.kColorWhite)
-    for _, particle in ipairs(particles) do
+    for index = 1, #particles do
+        local particle = particles[index]
         gfx.fillRect(particle.x, particle.y, 2, 2)
     end
 end
@@ -1188,7 +1201,8 @@ local function drawRadar()
         gfx.fillRect(x - size // 2, y - size // 2, size, size)
     end
 
-    for _, flag in ipairs(flags) do
+    for index = 1, #flags do
+        local flag = flags[index]
         if not flag.collected then
             local x, y = tileToWorld(flag.x, flag.y)
             plot(x, y, 3)
@@ -1198,7 +1212,8 @@ local function drawRadar()
     plot(player.x, player.y, 5)
 
     gfx.setColor(gfx.kColorBlack)
-    for _, enemy in ipairs(enemies) do
+    for index = 1, #enemies do
+        local enemy = enemies[index]
         plot(enemy.x, enemy.y, 4)
     end
 end
