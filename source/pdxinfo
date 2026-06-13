@@ -1,0 +1,7 @@
+name=Rally Run
+author=Mathan Games
+description=A Playdate maze-driving arcade prototype inspired by rally chase games.
+bundleID=com.mathan.rallyrun
+version=1.0
+buildNumber=8
+imagePath=images/launcher
