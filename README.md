@@ -36,6 +36,7 @@ Then open `RallyRun.pdx` in the Playdate Simulator, or sideload it onto a Playda
 
 ## Project Structure
 
+- `source/main.lua`: entry point loaded by `pdc`; imports the game
 - `source/RallyRun.lua`: main game code
 - `source/pdxinfo`: Playdate package metadata
 - `source/images/launcher/`: launcher card, icon, and launch images
@@ -48,7 +49,6 @@ Then open `RallyRun.pdx` in the Playdate Simulator, or sideload it onto a Playda
 Rally Run uses third-party font assets that are not part of the Playdate SDK. Before building, distributing, or modifying the game, make sure you have the appropriate license for:
 
 - [Supermini (Playdate font)](https://gingerbeardman.itch.io/supermini-playdate-font) by gingerbeardman, used by the game as `source/fonts/Supermini.fnt`.
-- [Full Circle](https://www.fontspace.com/full-circle-font-f10794) by mgl23, included as `source/fonts/full-circle.fnt`. Commercial use may require a donation or commercial license from the designer.
 
 ## Package Metadata
 

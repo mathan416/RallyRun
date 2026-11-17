@@ -47,8 +47,12 @@ local MAX_SMOKE_PARTICLES <const> = 48
 
 local MAP <const> = {}
 
-local SPAWN_TILES <const> = {
-    { 1, 1 }, { 18, 13 }, { 18, 1 }, { 1, 13 }
+local PLAYER_SPAWN <const> = { x = 1, y = 1 }
+
+local ENEMY_SPAWNS <const> = {
+    { x = 18, y = 13, dir = "left" },
+    { x = 18, y = 1, dir = "left" },
+    { x = 1, y = 13, dir = "right" }
 }
 
 local game = {}
@@ -60,13 +64,7 @@ local particles = {}
 local mazeImage = nil
 local highScore = 0
 local celebrationCar = {}
-local titleCar = {
-    x = SCREEN_W + 24,
-    y = 32,
-    dir = "left",
-    speed = 1.8,
-    smokeTimer = 0
-}
+local titleCar = {}
 
 local audio = {
     engine = nil,
@@ -550,13 +548,53 @@ local function setFlag(tx, ty)
 end
 
 local function isSpawnTile(tx, ty)
-    for _, spawn in ipairs(SPAWN_TILES) do
-        if spawn[1] == tx and spawn[2] == ty then
+    if PLAYER_SPAWN.x == tx and PLAYER_SPAWN.y == ty then
+        return true
+    end
+
+    for index = 1, #ENEMY_SPAWNS do
+        local spawn = ENEMY_SPAWNS[index]
+        if spawn.x == tx and spawn.y == ty then
             return true
         end
     end
 
     return false
+end
+
+local function enemySpeedForLevel(level)
+    return level >= 3 and 2 or 1
+end
+
+local function resetActors(invincibleFrames)
+    player.x, player.y = tileToWorld(PLAYER_SPAWN.x, PLAYER_SPAWN.y)
+    player.dir = "none"
+    player.queuedDir = "none"
+    player.speed = 0
+    player.invincible = invincibleFrames
+
+    enemies = {}
+    for index = 1, #ENEMY_SPAWNS do
+        local spawn = ENEMY_SPAWNS[index]
+        local x, y = tileToWorld(spawn.x, spawn.y)
+        enemies[index] = {
+            x = x,
+            y = y,
+            dir = spawn.dir,
+            speed = enemySpeedForLevel(game.level),
+            stun = 0
+        }
+    end
+end
+
+local function newScreenCar(x, y, dir, speed)
+    return {
+        x = x,
+        y = y,
+        dir = dir,
+        speed = speed,
+        smokeTimer = 0
+    }
 end
 
 local function randomizeFlags()
@@ -585,63 +623,31 @@ local function resetGame(showTitle)
         fuel = 100,
         lives = 3,
         state = showTitle and "title" or "playing",
-        message = showTitle and "RALLY RUN" or "STAGE 1",
         messageTimer = 0,
         level = 1,
         collected = 0,
-        radarZoom = 1,
         frame = 0,
         gameOverTimer = 0,
         newHighScore = false
     }
 
     player = {
-        x = 0,
-        y = 0,
-        dir = "none",
-        queuedDir = "none",
-        speed = 0,
         minSpeed = 1.2,
         maxSpeed = 2.35,
         acceleration = 0.12,
         brake = 0.12,
         friction = 0.025,
-        invincible = 90,
         smokeCooldown = 0
     }
-    player.x, player.y = tileToWorld(1, 1)
-
-    enemies = {
-        { x = 0, y = 0, dir = "left", speed = 1, stun = 0 },
-        { x = 0, y = 0, dir = "left", speed = 1, stun = 0 },
-        { x = 0, y = 0, dir = "right", speed = 1, stun = 0 }
-    }
-    enemies[1].x, enemies[1].y = tileToWorld(18, 13)
-    enemies[2].x, enemies[2].y = tileToWorld(18, 1)
-    enemies[3].x, enemies[3].y = tileToWorld(1, 13)
-    enemies[1].dir = "left"
-    enemies[2].dir = "left"
-    enemies[3].dir = "right"
+    resetActors(90)
 
     generateMaze()
     randomizeFlags()
 
     smoke = {}
     particles = {}
-    celebrationCar = {
-        x = -20,
-        y = 211,
-        dir = "right",
-        speed = 2.4,
-        smokeTimer = 0
-    }
-    titleCar = {
-        x = SCREEN_W + 24,
-        y = 32,
-        dir = "left",
-        speed = 2.4,
-        smokeTimer = 0
-    }
+    celebrationCar = newScreenCar(-20, 211, "right", 2.4)
+    titleCar = newScreenCar(SCREEN_W + 24, 32, "left", 2.4)
 
     if showTitle then
         startTitleMusic()
@@ -651,47 +657,30 @@ local function resetGame(showTitle)
 end
 
 local function loseLife()
+    if game.state ~= "playing" then
+        return
+    end
+
     game.lives -= 1
     playCrashSound()
+    smoke = {}
 
     if game.lives <= 0 then
         game.state = "gameover"
-        game.message = "GAME OVER"
-        game.messageTimer = 90
         game.gameOverTimer = 90
         game.newHighScore = game.score > highScore
         playGameOverSound()
         if game.newHighScore then
             highScore = game.score
             saveHighScore()
-            smoke = {}
-            celebrationCar = {
-                x = -20,
-                y = 211,
-                dir = "right",
-                speed = 2.4,
-                smokeTimer = 0
-            }
         end
+        celebrationCar = newScreenCar(-20, 211, "right", 2.4)
         return
     end
 
-    player.x, player.y = tileToWorld(1, 1)
-    player.dir = "none"
-    player.queuedDir = "none"
-    player.speed = 0
-    player.invincible = 120
-    smoke = {}
-
-    enemies[1].x, enemies[1].y = tileToWorld(18, 13)
-    enemies[2].x, enemies[2].y = tileToWorld(18, 1)
-    enemies[3].x, enemies[3].y = tileToWorld(1, 13)
-    enemies[1].dir = "left"
-    enemies[2].dir = "left"
-    enemies[3].dir = "right"
-    for _, enemy in ipairs(enemies) do
-        enemy.stun = 0
-    end
+    -- Respawn with at least half a tank so running dry costs one life, not all of them.
+    game.fuel = math.max(game.fuel, 50)
+    resetActors(120)
 end
 
 local function nextLevel()
@@ -700,25 +689,9 @@ local function nextLevel()
     game.collected = 0
     game.fuel = math.min(100, game.fuel + 40)
     game.state = "levelintro"
-    game.message = "STAGE " .. game.level
     game.messageTimer = LEVEL_INTRO_FRAMES
 
-    player.x, player.y = tileToWorld(1, 1)
-    player.dir = "none"
-    player.queuedDir = "none"
-    player.speed = 0
-    player.invincible = 120
-
-    enemies[1].x, enemies[1].y = tileToWorld(18, 13)
-    enemies[2].x, enemies[2].y = tileToWorld(18, 1)
-    enemies[3].x, enemies[3].y = tileToWorld(1, 13)
-    enemies[1].dir = "left"
-    enemies[2].dir = "left"
-    enemies[3].dir = "right"
-    for index, enemy in ipairs(enemies) do
-        enemy.speed = game.level >= 3 and 2 or 1
-        enemy.stun = 0
-    end
+    resetActors(120)
 
     generateMaze()
     randomizeFlags()
@@ -807,21 +780,54 @@ local function emitSmokeBurst()
     emitSmokeFrom(player.x, player.y, player.dir, player.speed, 22)
 end
 
-local function moveEntity(entity, speed)
-    local dir = DIRS[entity.dir]
-    if dir.x == 0 and dir.y == 0 then
+-- Moves an entity `speed` pixels along its direction without ever stepping past a
+-- tile centre: each centre crossed is landed on exactly, `onCenter` gets a chance
+-- to turn, and the wall ahead is checked before continuing.
+local function moveEntity(entity, speed, onCenter)
+    local remaining = speed
+
+    while remaining > 0 and isDirection(entity.dir) do
+        if isCentered(entity) then
+            snapToCenter(entity)
+            if onCenter ~= nil then
+                onCenter(entity)
+            end
+            if not isDirection(entity.dir) or not canMove(entity, entity.dir) then
+                return
+            end
+        end
+
+        local dir = DIRS[entity.dir]
+        local tx, ty = worldToTile(entity.x, entity.y)
+        local cx, cy = tileToWorld(tx, ty)
+        local offset = (entity.x - cx) * dir.x + (entity.y - cy) * dir.y
+        local toNextCenter = offset < 0 and -offset or CELL - offset
+        local step = math.min(remaining, toNextCenter)
+
+        entity.x += dir.x * step
+        entity.y += dir.y * step
+        remaining -= step
+    end
+end
+
+local function onPlayerCenter()
+    if isDirection(player.queuedDir) and canMove(player, player.queuedDir) then
+        player.dir = player.queuedDir
+        player.speed = math.max(player.speed, player.minSpeed)
+    elseif isDirection(player.dir) and not canMove(player, player.dir) then
+        player.dir = "none"
+        player.speed = 0
+    end
+end
+
+local function onEnemyCenter(enemy)
+    if enemy.stun > 0 then
         return
     end
 
-    if isCentered(entity) then
-        snapToCenter(entity)
-        if not canMove(entity, entity.dir) then
-            return
-        end
+    if not canMove(enemy, enemy.dir) or math.random(1, 3) == 1 then
+        enemy.dir = chooseEnemyDirection(enemy)
     end
-
-    entity.x += dir.x * speed
-    entity.y += dir.y * speed
 end
 
 local function updateInput()
@@ -839,12 +845,6 @@ local function updateInput()
         queueAbsoluteDirection("right")
     end
 
-    if isDirection(player.queuedDir) and isCentered(player) and canMove(player, player.queuedDir) then
-        snapToCenter(player)
-        player.dir = player.queuedDir
-        player.speed = math.max(player.speed, player.minSpeed)
-    end
-
     if pd.buttonJustPressed(pd.kButtonA) and player.smokeCooldown <= 0 and game.fuel > 8 then
         emitSmokeBurst()
         playSmokeSound()
@@ -856,14 +856,11 @@ end
 local function updatePlayer()
     local isBraking = pd.buttonIsPressed(pd.kButtonB)
 
-    if isCentered(player) then
+    -- A stopped car has no distance to cover, so moveEntity won't reach a centre
+    -- callback; let a queued direction pull it away here.
+    if not isDirection(player.dir) and isCentered(player) then
         snapToCenter(player)
-        if isDirection(player.queuedDir) and canMove(player, player.queuedDir) then
-            player.dir = player.queuedDir
-        elseif not canMove(player, player.dir) then
-            player.dir = "none"
-            player.speed = 0
-        end
+        onPlayerCenter()
     end
 
     if player.dir ~= "none" then
@@ -876,7 +873,7 @@ local function updatePlayer()
         player.speed = math.max(0, player.speed - player.friction)
     end
 
-    moveEntity(player, player.speed)
+    moveEntity(player, player.speed, onPlayerCenter)
 
     game.fuel -= 0.012 + player.speed * 0.008
     player.invincible = math.max(0, player.invincible - 1)
@@ -893,17 +890,10 @@ local function updateEnemies()
         local enemy = enemies[index]
         if enemy.stun > 0 then
             enemy.stun -= 1
-        elseif isCentered(enemy) then
-            snapToCenter(enemy)
-            if not canMove(enemy, enemy.dir) then
-                enemy.dir = chooseEnemyDirection(enemy)
-            elseif math.random(1, 3) == 1 then
-                enemy.dir = chooseEnemyDirection(enemy)
-            end
         end
 
         local speed = enemy.stun > 0 and 0.25 or enemy.speed
-        moveEntity(enemy, speed)
+        moveEntity(enemy, speed, onEnemyCenter)
     end
 end
 
@@ -997,6 +987,7 @@ local function checkCollisions()
 
             if game.collected == #flags then
                 nextLevel()
+                return
             end
         end
     end
@@ -1034,7 +1025,6 @@ local function updateGame()
         if pd.buttonJustPressed(pd.kButtonA) then
             stopTitleMusic()
             game.state = "levelintro"
-            game.message = "STAGE 1"
             game.messageTimer = LEVEL_INTRO_FRAMES
             smoke = {}
             playStageStartSound()
@@ -1061,12 +1051,12 @@ local function updateGame()
         return
     end
 
-    if game.messageTimer > 0 then
-        game.messageTimer -= 1
-    end
-
     updateInput()
     updatePlayer()
+    if game.state ~= "playing" then
+        return
+    end
+
     updateEnemies()
     updateSmoke()
     updateParticles()
@@ -1188,33 +1178,37 @@ local function drawRadar()
     local radarY = 128
     local radarW = HUD_W - 16
     local radarH = 66
-    local sx = radarW / WORLD_W * game.radarZoom
-    local sy = radarH / SCREEN_H * game.radarZoom
+    local sx = radarW / WORLD_W
+    local sy = radarH / SCREEN_H
 
-    gfx.setColor(gfx.kColorWhite)
+    -- The HUD panel is white, so everything on the radar is drawn in black;
+    -- rivals are hollow squares to tell them apart from the player.
+    gfx.setColor(gfx.kColorBlack)
     gfx.drawText("RADAR", radarX, radarY - 14)
     gfx.drawRect(radarX, radarY, radarW, radarH)
 
-    local function plot(wx, wy, size)
-        local x = radarX + math.floor(wx * sx) % radarW
-        local y = radarY + math.floor(wy * sy) % radarH
-        gfx.fillRect(x - size // 2, y - size // 2, size, size)
+    local function radarPoint(wx, wy, size)
+        local x = radarX + math.min(radarW - 1, math.floor(wx * sx))
+        local y = radarY + math.min(radarH - 1, math.floor(wy * sy))
+        return x - size // 2, y - size // 2
     end
 
     for index = 1, #flags do
         local flag = flags[index]
         if not flag.collected then
-            local x, y = tileToWorld(flag.x, flag.y)
-            plot(x, y, 3)
+            local fx, fy = tileToWorld(flag.x, flag.y)
+            local x, y = radarPoint(fx, fy, 3)
+            gfx.fillRect(x, y, 3, 3)
         end
     end
 
-    plot(player.x, player.y, 5)
+    local px, py = radarPoint(player.x, player.y, 5)
+    gfx.fillRect(px, py, 5, 5)
 
-    gfx.setColor(gfx.kColorBlack)
     for index = 1, #enemies do
         local enemy = enemies[index]
-        plot(enemy.x, enemy.y, 4)
+        local x, y = radarPoint(enemy.x, enemy.y, 5)
+        gfx.drawRect(x, y, 5, 5)
     end
 end
 
@@ -1240,20 +1234,6 @@ local function drawHud()
 
     gfx.drawText("A SMOKE", HUD_X + 8, 204)
     gfx.drawText("B BRAKE", HUD_X + 8, 221)
-end
-
-local function drawMessageOverlay()
-    if game.messageTimer <= 0 then
-        return
-    end
-
-    gfx.setColor(gfx.kColorBlack)
-    gfx.setDitherPattern(0.65, gfx.image.kDitherTypeBayer8x8)
-    gfx.fillRect(42, 86, 236, 56)
-    gfx.setDitherPattern(1, gfx.image.kDitherTypeBayer8x8)
-    gfx.setColor(gfx.kColorWhite)
-    gfx.drawRect(42, 86, 236, 56)
-    gfx.drawTextAligned(game.message, 160, 102, kTextAlignment.center)
 end
 
 local function drawStandaloneScreen(title, subtitle, prompt, detail, promptY)
@@ -1320,7 +1300,6 @@ local function drawGame()
     drawPlayer()
     drawEnemies()
     drawHud()
-    drawMessageOverlay()
 end
 
 function pd.update()
