@@ -328,6 +328,67 @@ local function useDefaultFont()
     end
 end
 
+-- Top-down car sprites, drawn once facing up and rotated for the other
+-- directions. Both cars carry a black outline so they stand out on the
+-- light dithered road.
+local CAR_SPRITE_SIZE <const> = 16
+local playerCarSprites = {}
+local enemyCarSprites = {}
+
+-- Shared silhouette: narrow body with a tapered nose at the top, wheels
+-- poking out the sides and a wide spoiler across the tail.
+local function drawCarSilhouette()
+    gfx.setColor(gfx.kColorBlack)
+    gfx.fillRect(1, 3, 2, 4)
+    gfx.fillRect(13, 3, 2, 4)
+    gfx.fillRect(1, 9, 2, 4)
+    gfx.fillRect(13, 9, 2, 4)
+    gfx.fillRect(5, 0, 6, 2)
+    gfx.fillRect(4, 2, 8, 12)
+    gfx.fillRect(3, 14, 10, 2)
+end
+
+local function drawPlayerCarBody()
+    drawCarSilhouette()
+    gfx.setColor(gfx.kColorWhite)
+    -- headlights, windscreen and rear window
+    gfx.drawPixel(5, 1)
+    gfx.drawPixel(10, 1)
+    gfx.fillRect(5, 5, 6, 2)
+    gfx.fillRect(6, 11, 4, 1)
+end
+
+local function drawEnemyCarBody()
+    drawCarSilhouette()
+    gfx.setColor(gfx.kColorWhite)
+    -- white bodywork inside the black outline, then dark glass on top
+    gfx.fillRect(6, 1, 4, 1)
+    gfx.fillRect(5, 3, 6, 10)
+    gfx.setColor(gfx.kColorBlack)
+    gfx.fillRect(5, 5, 6, 2)
+    gfx.fillRect(6, 11, 4, 1)
+    gfx.fillRect(7, 8, 2, 2)
+end
+
+local function buildCarSprites(drawBody)
+    local up = gfx.image.new(CAR_SPRITE_SIZE, CAR_SPRITE_SIZE, gfx.kColorClear)
+    gfx.pushContext(up)
+    drawBody()
+    gfx.popContext()
+
+    return {
+        up = up,
+        right = up:rotatedImage(90),
+        down = up:rotatedImage(180),
+        left = up:rotatedImage(270)
+    }
+end
+
+local function setupCarSprites()
+    playerCarSprites = buildCarSprites(drawPlayerCarBody)
+    enemyCarSprites = buildCarSprites(drawEnemyCarBody)
+end
+
 local function drawCenteredText(text, x, y)
     local width = gfx.getTextSize(text)
     gfx.drawText(text, x - width / 2, y)
@@ -569,6 +630,7 @@ end
 local function resetActors(invincibleFrames)
     player.x, player.y = tileToWorld(PLAYER_SPAWN.x, PLAYER_SPAWN.y)
     player.dir = "none"
+    player.facing = "right"
     player.queuedDir = "none"
     player.speed = 0
     player.invincible = invincibleFrames
@@ -813,6 +875,7 @@ end
 local function onPlayerCenter()
     if isDirection(player.queuedDir) and canMove(player, player.queuedDir) then
         player.dir = player.queuedDir
+        player.facing = player.dir
         player.speed = math.max(player.speed, player.minSpeed)
     elseif isDirection(player.dir) and not canMove(player, player.dir) then
         player.dir = "none"
@@ -1105,15 +1168,8 @@ local function drawPlayer()
         return
     end
 
-    gfx.setColor(gfx.kColorWhite)
-    gfx.fillRoundRect(player.x - 7, player.y - 5, 14, 10, 2)
-    gfx.setColor(gfx.kColorBlack)
-    gfx.fillRect(player.x - 3, player.y - 7, 7, 5)
-    gfx.fillCircleAtPoint(player.x - 4, player.y + 5, 2)
-    gfx.fillCircleAtPoint(player.x + 5, player.y + 5, 2)
-
-    local dir = DIRS[player.dir]
-    gfx.drawLine(player.x, player.y, player.x + dir.x * 9, player.y + dir.y * 9)
+    local facing = isDirection(player.dir) and player.dir or player.facing or "right"
+    playerCarSprites[facing]:drawCentered(player.x, player.y)
 end
 
 local function drawScreenCar(car)
@@ -1152,16 +1208,15 @@ end
 local function drawEnemies()
     for index = 1, #enemies do
         local enemy = enemies[index]
-        gfx.setColor(gfx.kColorWhite)
+        local sprite = enemyCarSprites[enemy.dir] or enemyCarSprites.left
         if enemy.stun > 0 then
-            gfx.setDitherPattern(0.35, gfx.image.kDitherTypeBayer8x8)
+            -- Stunned rivals fade in and out so they read as harmless.
+            local w, h = sprite:getSize()
+            local alpha = game.frame % 10 < 5 and 0.35 or 0.6
+            sprite:drawFaded(enemy.x - w // 2, enemy.y - h // 2, alpha, gfx.image.kDitherTypeBayer4x4)
+        else
+            sprite:drawCentered(enemy.x, enemy.y)
         end
-        gfx.fillRect(enemy.x - 6, enemy.y - 6, 12, 12)
-        gfx.setDitherPattern(1, gfx.image.kDitherTypeBayer8x8)
-        gfx.setColor(gfx.kColorBlack)
-        gfx.drawLine(enemy.x - 4, enemy.y - 2, enemy.x + 4, enemy.y - 2)
-        gfx.fillCircleAtPoint(enemy.x - 3, enemy.y + 5, 2)
-        gfx.fillCircleAtPoint(enemy.x + 3, enemy.y + 5, 2)
     end
 end
 
@@ -1311,5 +1366,6 @@ end
 
 math.randomseed(pd.getSecondsSinceEpoch())
 setupAudio()
+setupCarSprites()
 loadHighScore()
 resetGame(true)
